@@ -8,6 +8,8 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasNodeType, type CanvasNodeData, type Position } from "../types";
+import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
+import type { CanvasResourceReference } from "../utils/canvas-resource-references";
 
 type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 const selectionBlue = "#2f80ff";
@@ -23,6 +25,8 @@ type CanvasNodeProps = {
     editRequestNonce?: number;
     showPanel: boolean;
     showImageInfo: boolean;
+    resourceLabel?: CanvasResourceReference;
+    mentionReferences?: CanvasResourceReference[];
     renderPanel?: (node: CanvasNodeData) => ReactNode;
     renderNodeContent?: (node: CanvasNodeData) => ReactNode;
     batchCount?: number;
@@ -55,6 +59,7 @@ type NodeContentRendererProps = {
     batchOpening: boolean;
     batchRecovering: boolean;
     renderNodeContent?: (node: CanvasNodeData) => ReactNode;
+    mentionReferences: CanvasResourceReference[];
     onContentChange: (nodeId: string, content: string) => void;
     onStopEditing: () => void;
     onRetry?: (node: CanvasNodeData) => void;
@@ -74,6 +79,8 @@ export const CanvasNode = React.memo(function CanvasNode({
     editRequestNonce = 0,
     showPanel,
     showImageInfo,
+    resourceLabel,
+    mentionReferences = [],
     renderPanel,
     renderNodeContent,
     batchCount = 0,
@@ -146,6 +153,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             const target = event.target;
             if (!(target instanceof Node)) return;
             if (isEditingContent && textareaRef.current?.contains(target)) return;
+            if (target instanceof Element && target.closest('[data-canvas-resource-mention-menu="true"]')) return;
 
             setIsEditingContent(false);
         };
@@ -291,6 +299,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         batchOpening={batchOpening}
                         batchRecovering={batchRecovering}
                         renderNodeContent={renderNodeContent}
+                        mentionReferences={mentionReferences}
                         onContentChange={onContentChange}
                         onStopEditing={() => setIsEditingContent(false)}
                         onRetry={onRetry}
@@ -301,6 +310,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                 </div>
 
                 {showImageInfo && hasImageContent ? <ImageInfoBar node={data} /> : null}
+                {resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
 
                 {!hasImageContent && !hasVideoContent && !hasAudioContent ? <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12" style={{ background: `linear-gradient(to top, ${theme.canvas.background}66, transparent)` }} /> : null}
 
@@ -366,7 +376,7 @@ function ErrorContent({ node, theme, onRetry }: Pick<NodeContentRendererProps, "
     );
 }
 
-function TextContent({ node, theme, isEditingContent, textareaRef, onContentChange, onStopEditing, onGenerateImage }: NodeContentRendererProps) {
+function TextContent({ node, theme, isEditingContent, textareaRef, mentionReferences, onContentChange, onStopEditing, onGenerateImage }: NodeContentRendererProps) {
     return (
         <div className="flex h-full w-full flex-col overflow-hidden pt-8">
             <button
@@ -386,12 +396,13 @@ function TextContent({ node, theme, isEditingContent, textareaRef, onContentChan
                 生图
             </button>
             {isEditingContent ? (
-                <textarea
+                <CanvasResourceMentionTextarea
                     ref={textareaRef}
                     className="thin-scrollbar block h-full w-full resize-none overflow-y-auto whitespace-pre-wrap break-words border-none bg-transparent pl-4 pr-14 pt-0 pb-4 m-0 font-mono leading-relaxed outline-none select-text appearance-none"
                     style={{ fontSize: `${node.metadata?.fontSize || 14}px`, color: theme.node.text }}
                     value={node.metadata?.content || ""}
-                    onChange={(event) => onContentChange(node.id, event.target.value)}
+                    references={mentionReferences}
+                    onChange={(value) => onContentChange(node.id, value)}
                     onBlur={onStopEditing}
                     onKeyDown={(event) => {
                         if (event.key === "Escape") onStopEditing();
@@ -573,6 +584,14 @@ function ImageInfoBar({ node }: { node: CanvasNodeData }) {
                 {width} x {height}
                 {size ? ` · ${size}` : ""}
             </span>
+        </div>
+    );
+}
+
+function ResourceLabelBadge({ reference }: { reference: CanvasResourceReference }) {
+    return (
+        <div className={`pointer-events-none absolute left-3 top-3 z-40 rounded-md px-2 py-1 text-[11px] font-semibold leading-none text-white shadow-sm backdrop-blur-sm ${reference.active ? "bg-black/65" : "bg-black/30 opacity-70"}`}>
+            {reference.label}
         </div>
     );
 }
