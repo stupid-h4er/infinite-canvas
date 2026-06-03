@@ -39,6 +39,7 @@ import { CanvasToolbar } from "../components/canvas-toolbar";
 import { AssetPickerModal, type AssetPickerTab, type InsertAssetPayload } from "../components/asset-picker-modal";
 import { CanvasZoomControls } from "../components/canvas-zoom-controls";
 import { useCanvasStore } from "../stores/use-canvas-store";
+import { buildCanvasResourceReferences, buildInputMentionReferences, buildNodeMentionReferences } from "../utils/canvas-resource-references";
 import {
     CanvasNodeType,
     type CanvasAssistantImage,
@@ -527,24 +528,21 @@ function InfiniteCanvasPage() {
             let isNearNode = false;
             let best: { nodeId: string; priority: number } | null = null;
 
-            [...nodesRef.current]
-                .filter((node) => !isHiddenBatchChild(node, nodesRef.current))
-                .reverse()
-                .forEach((node) => {
-                    const anchor = getConnectionTargetAnchor(node, current);
-                    const dx = world.x - anchor.x;
-                    const dy = world.y - anchor.y;
-                    const hitsHandle = dx * dx + dy * dy <= handleRadius * handleRadius;
-                    const hitsInside = world.x >= node.position.x && world.x <= node.position.x + node.width && world.y >= node.position.y && world.y <= node.position.y + node.height;
-                    const hitsExpanded = world.x >= node.position.x - padding && world.x <= node.position.x + node.width + padding && world.y >= node.position.y - padding && world.y <= node.position.y + node.height + padding;
+            for (const node of [...nodesRef.current].filter((item) => !isHiddenBatchChild(item, nodesRef.current)).reverse()) {
+                const anchor = getConnectionTargetAnchor(node, current);
+                const dx = world.x - anchor.x;
+                const dy = world.y - anchor.y;
+                const hitsHandle = dx * dx + dy * dy <= handleRadius * handleRadius;
+                const hitsInside = world.x >= node.position.x && world.x <= node.position.x + node.width && world.y >= node.position.y && world.y <= node.position.y + node.height;
+                const hitsExpanded = world.x >= node.position.x - padding && world.x <= node.position.x + node.width + padding && world.y >= node.position.y - padding && world.y <= node.position.y + node.height + padding;
 
-                    if (!hitsHandle && !hitsInside && !hitsExpanded) return;
-                    isNearNode = true;
-                    if (node.id === current.nodeId || !normalizeConnection(current.nodeId, node.id, nodesRef.current, current.handleType)) return;
+                if (!hitsHandle && !hitsInside && !hitsExpanded) continue;
+                isNearNode = true;
+                if (node.id === current.nodeId || !normalizeConnection(current.nodeId, node.id, nodesRef.current, current.handleType)) continue;
 
-                    const priority = hitsInside ? 0 : hitsHandle ? 1 : 2;
-                    if (!best || priority < best.priority) best = { nodeId: node.id, priority };
-                });
+                const priority = hitsInside ? 0 : hitsHandle ? 1 : 2;
+                if (!best || priority < best.priority) best = { nodeId: node.id, priority };
+            }
 
             return { nodeId: best?.nodeId || null, isNearNode };
         },
@@ -617,6 +615,19 @@ function InfiniteCanvasPage() {
         });
         return map;
     }, [connections, nodes]);
+    const resourceContextNodeId = dialogNodeId || activeNodeId;
+    const canvasResourceReferences = useMemo(() => buildCanvasResourceReferences(nodes, connections, resourceContextNodeId), [connections, nodes, resourceContextNodeId]);
+    const resourceReferenceByNodeId = useMemo(() => new Map(canvasResourceReferences.map((reference) => [reference.nodeId, reference])), [canvasResourceReferences]);
+    const mentionReferencesByNodeId = useMemo(() => {
+        const map = new Map<string, ReturnType<typeof buildNodeMentionReferences>>();
+        nodes.forEach((node) => map.set(node.id, buildNodeMentionReferences(node, nodes, connections)));
+        return map;
+    }, [connections, nodes]);
+    const configMentionReferencesById = useMemo(() => {
+        const map = new Map<string, ReturnType<typeof buildInputMentionReferences>>();
+        configInputsById.forEach((inputs, nodeId) => map.set(nodeId, buildInputMentionReferences(inputs)));
+        return map;
+    }, [configInputsById]);
 
     const createNode = useCallback(
         (type: CanvasNodeType, position?: Position) => {
@@ -2190,10 +2201,12 @@ function InfiniteCanvasPage() {
                             batchRecovering={collapsingBatchIds.has(node.id)}
                             batchMotion={batchMotionById.get(node.id)}
                             showImageInfo={showImageInfo}
+                            resourceLabel={resourceReferenceByNodeId.get(node.id)}
                             renderPanel={(panelNode) => (
                                 <CanvasNodePromptPanel
                                     node={panelNode}
                                     isRunning={runningNodeId === panelNode.id}
+                                    mentionReferences={mentionReferencesByNodeId.get(panelNode.id) || []}
                                     onPromptChange={handleNodePromptChange}
                                     onConfigChange={handleConfigNodeChange}
                                     onGenerate={handleGenerateNode}
@@ -2209,6 +2222,7 @@ function InfiniteCanvasPage() {
                                     isRunning={runningNodeId === contentNode.id}
                                     inputSummary={getInputSummary(configInputsById.get(contentNode.id) || [])}
                                     inputs={configInputsById.get(contentNode.id) || []}
+                                    mentionReferences={configMentionReferencesById.get(contentNode.id) || []}
                                     onConfigChange={handleConfigNodeChange}
                                     onTextInputChange={handleNodeContentChange}
                                     onGenerate={(nodeId) => {
